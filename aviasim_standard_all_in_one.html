@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+  <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Авиасимулятор</title>
+      <style>
+        body {
+          background: #e0e0e0;
+        }
+        #holst {
+          border-width: 5px;
+          border-style: solid;
+          border-color: rgb(100, 100, 200);
+        }
+        #cont1 {
+          float: left;
+          width: 810px;
+          height: 610px;
+        }
+        #cont2 {
+          float: left;
+          width: 350px;
+          height: 585px; 
+          padding: 10px;
+          margin-left: 10px;
+          border-width: 3px;
+          border-style: solid;
+          border-color: rgb(100, 100, 200);
+        }
+        .cont3 {
+          float: left;
+          width: 150px;
+          height: 120px; 
+          padding: 5px;
+          margin: 5px;
+          border-width: 2px;
+          border-style: solid;
+          border-color: rgb(150, 150, 255);
+          text-align: center;
+        }
+      </style>
+<script>
+// Время
+let ms,          // счет системных миллисекунд
+    t,           // счет времени в секундах
+    t_prev,      // время на предыдущем шаге
+    dt;          // изменение времени за шаг
+let state = 0;   // 0 - нет движения   1 - движение
+// Отрисовка на холсте
+let holst, ctx;    // переменные для рисования на холсте
+let holst_width = 800,
+    holst_height = 600;
+// Положение осей самолета
+let teta,          // тангаж в радианах
+    gamma,         // крен в радианах
+    psi,           // курс в радианах
+	alpha,         // угол атаки крыла в радианах
+	alpha_deg,     // угол атаки крыла в градусах
+	beta;          // угол снижения (относительно воздуха, без учета ветра) в радианах
+// Поляра крыла
+let Cy_alpha = [
+    0.15,
+	0.22, 0.29,
+	0.37, 0.44,
+	0.51, 0.58,
+	0.65, 0.72,
+	0.79, 0.86,
+	0.93, 1.0,
+	1.07, 1.14,
+	1.2,  1.27,
+	1.34, 1.38,
+	1.42, 1.45,
+	1.47 ];
+let Cx_alpha = [
+    0.015,
+	0.015, 0.018,
+	0.02,  0.025,
+	0.03,  0.037,
+	0.045, 0.052,
+	0.06,  0.068,
+	0.077, 0.087,
+	0.097, 0.111,
+	0.125, 0.142,
+	0.158, 0.164,
+	0.17,  0.187,
+	0.204 ];
+// Двигатель	
+let T_eng;  // тяга двигателя, нормированная на mg	
+// Скорости
+let V,	      //воздушная  скорость, м/сек
+    V_prib,   //приборная скорость, м/сек
+	V_x, V_y, V_z;  //проекции скорости (истинной, относительно земли), м/сек
+// Координаты
+let x_a, y_a, z_a, //глобальные координаты самолета (планера)
+    x_local_1, y_local_1, // координаты точки земной поверхности в локальной системе, движущейся и поворачивающейся вместе с самолетом 
+    x_local_2, y_local_2, // координаты точки в локальной системе, движущейся вместе с самолетом (но ее оси направлены вдоль осей глобальной)
+    xs, zs, // координаты проекции точки земной поверхности на виртуальном экране, м
+    xp, zp, // номера пикселей (сверху-вниз, слева-направо)
+    x, y, // глобальные координаты точки земной поверхности
+// Вспомогательные переменные
+    sinpsi, cospsi,
+	color; // цвет точки земной поверхности
+
+function vizualize_scene() {
+let k = 0.00025, // Масштабный коэффициент рисования на холсте (метров на пиксель)
+    d = 0.2;     // расстояние от глаза до экрана
+let xp_axis = 400, //проекция оси самолета на холст
+	zp_axis = 300;
+let lend_colr = [
+    "rgb(0, 0, 0)",         //заглушка для счета элементов массива с единицы
+	"rgb(200, 200, 200)",   //серый
+	"rgb(255, 255, 0)",     //желтый
+	"rgb(255, 100, 100)"    //красный
+	];
+ctx.fillStyle = "rgb(130, 130, 255)";
+ctx.fillRect(0, 0, holst_width, holst_height);
+ctx.fillStyle = "rgb(0, 155, 0)";
+singamma = Math.sin(gamma);
+cosgamma = Math.cos(gamma);
+xp_horizon = xp_axis + Math.round(800*teta*singamma);
+zp_horizon = zp_axis + Math.round(800*teta*cosgamma);
+zp_horizon_1 = zp_axis + Math.round(800*teta/cosgamma);
+a = Math.round(400*singamma/cosgamma);
+zp_horizon_left = zp_horizon_1 + a;
+zp_horizon_right = zp_horizon_1 - a;
+if (gamma >= 0) {
+   if (zp_horizon_left < 600) {
+      xp_horizon_left = 0;
+ 	  ctx.beginPath();
+      ctx.moveTo(xp_horizon_left, zp_horizon_left); 
+	  ctx.lineTo(xp_horizon_left, 600);
+	  ctx.lineTo(800, 600);
+   }
+   else {
+      xp_horizon_left = 400 - Math.round((600 - zp_horizon_1)*cosgamma/singamma);
+      zp_horizon_left = 600;
+	  ctx.beginPath();
+      ctx.moveTo(xp_horizon_left, zp_horizon_left); 
+	  ctx.lineTo(800, 600);
+   }
+   if (zp_horizon_right > 0) {
+      xp_horizon_right = 800;
+ 	  ctx.lineTo(xp_horizon_right, zp_horizon_right);
+      ctx.closePath();
+	  ctx.fill();
+   }
+   else {
+      xp_horizon_right = 400 + Math.round(zp_horizon_1*cosgamma/singamma);
+      zp_horizon_right = 0;
+	  ctx.lineTo(800, 0);
+	  ctx.lineTo(xp_horizon_right, zp_horizon_right);
+      ctx.closePath();
+	  ctx.fill();
+   }
+}
+else {
+   if (zp_horizon_left > 0) {
+      xp_horizon_left = 0;
+	  ctx.beginPath();
+      ctx.moveTo(xp_horizon_left, zp_horizon_left); 
+	  ctx.lineTo(0, 600);
+   }
+   else {
+      xp_horizon_left = 400 + Math.round(zp_horizon_1*cosgamma/singamma);
+      zp_horizon_left = 0;
+	  ctx.beginPath();
+      ctx.moveTo(xp_horizon_left, zp_horizon_left); 
+	  ctx.lineTo(0, 0); //до левого верхнего угла холста
+	  ctx.lineTo(0, 600); //до левого нижнего угла холста
+   }
+   if (zp_horizon_right < 600) {
+      xp_horizon_right = 800;
+	  ctx.lineTo(800, 600);
+ 	  ctx.lineTo(xp_horizon_right, zp_horizon_right);
+      ctx.closePath();
+	  ctx.fill();
+   }
+   else {
+      xp_horizon_right = 400 - Math.round((600 - zp_horizon_1)*cosgamma/singamma);
+      zp_horizon_right = 600;
+	  ctx.lineTo(xp_horizon_right, zp_horizon_right);
+      ctx.closePath();
+	  ctx.fill();
+   }
+}
+zp_min = 0; zp_max = 600;
+if (gamma >= 0 && zp_horizon_right > zp_min) zp_min = zp_horizon_right;
+if (gamma < 0 && zp_horizon_left > zp_min) zp_min = zp_horizon_left;
+for (zp = zp_min; zp <= zp_max; zp = zp + 1) {
+    if ( gamma== 0) {
+	   xp_min = 0;
+       xp_max = 800;
+    }
+    else {
+	   if (gamma > 0) {
+	      if (zp < zp_horizon_left) {
+		     xp_min = xp_horizon_right - Math.round((zp - zp_min)*cosgamma/singamma);
+		    }
+		    else {
+		     xp_min = 0;
+		    }
+        xp_max = 800;
+	   }
+	   else  {
+	      xp_min = 0;
+		  if (zp < zp_horizon_right) {
+		     xp_max = xp_horizon_left - Math.round((zp - zp_min)*cosgamma/singamma);
+		  }
+		  else {
+		     xp_max = 800;
+		  }
+	   }
+    }
+    for (xp = xp_min; xp <= xp_max; xp = xp + 1) {
+	  xp_1 = xp - xp_axis;
+	  zp_1 = zp - zp_axis;
+	  xp_2 = xp_1*cosgamma - zp_1*singamma  + xp_axis;
+      zp_2 = xp_1*singamma + zp_1*cosgamma + zp_axis;
+      zs = -(zp_2 - zp_axis - 800*teta) * 0.00025;
+      xs = (xp_2-400) * 0.00025;
+      y_local_2 = -(d*z_a/zs);
+      x_local_2 = (xs*y_local_2/d);
+      x_local_1 = x_local_2*cospsi + y_local_2*sinpsi;
+      y_local_1 = -x_local_2*sinpsi + y_local_2*cospsi;
+      y = y_local_1 + y_a;
+      x = x_local_1 + x_a;
+	  color = land(x,y);
+	  if (color != 0) {
+         ctx.fillStyle = lend_colr[color];
+         ctx.fillRect(xp, zp, 1, 1);
+      }
+    }
+ }
+ ctx.fillStyle = "rgb(255, 255, 255)";
+ ctx.fillRect(400, 0, 2, 10);
+ ctx.fillRect(400, 600, 2, -10);
+ ctx.fillRect(0, 300, 10, 2);
+ ctx.fillRect(800, 300, -10, 2);
+ document.stpw.height.value = Math.round(z_a);
+ document.stpw.velocity.value = Math.round(V*3.6);
+ document.stpw.wvelocity.value = Math.round(V_z*10)/10;
+ document.stpw.curse.value = Math.round(180*psi/Math.PI);
+ document.stpw.angleofattack.value = Math.round(alpha_deg);
+ document.stpw.roll.value = Math.round(180*gamma/Math.PI);
+ document.stpw.thrust.value = Math.round(T_eng*4500);
+ document.stpw.time.value = Math.round(t);
+}
+
+function land(x,y) {
+    colr = 0; //сброс цвета точки
+	if (x>-10 && x<10 && y>0 && y<300) colr = 1;       //ВПП-1 (серый)
+    if (x>-40 && x<-20 && y>110 && y<150) colr = 2;    //метка-1 (желтый)
+    if (x>-10 && x<10 && y>3000 && y<3300) colr = 1;   //ВПП-2 (серый)
+    if (x>-40 && x<-20 && y>3110 && y<3150) colr = 3;  //метка-2 (красный)
+    return colr;
+}
+
+function initiate() {
+  //Глобальные! переменные для доступа к холсту
+  holst = document.getElementById('holst');
+  ctx = holst.getContext("2d");
+  
+  //Начальные условия
+  t = 0;
+  t_prev = 0;
+  T_eng = 0.0;    // тяга двигателя, нормированная на mg
+  gamma = 0.0;    // крен в радианах
+  alpha_deg = 10;  // угол атаки крыла в градусах
+  alpha = alpha_deg*Math.PI/180;           // угол атаки крыла в радианах
+  Cy_a_gamma = Cy_alpha[alpha_deg+1]*Math.cos(gamma);
+  Cx_a = Cx_alpha[alpha_deg+1];
+  beta = Cx_a/Cy_a_gamma - T_eng; // угол снижения (относительно воздуха)
+  teta = (alpha_deg - 2)*Math.PI/180 - beta; // тангаж в радианах
+  V = Math.sqrt(354/Cy_a_gamma);  //воздушная  скорость, м/сек
+  V_prib = V*Math.cos(beta+teta);   // приборная скорость, м/сек
+  V_z = -V*Math.sin(beta);      // вертикальная скорость, м/сек  
+  psi = 0.0*Math.PI/180;        // курс в радианах
+  sinpsi = Math.sin(psi);
+  cospsi = Math.cos(psi);
+  // Координаты
+  x_a = 0.0;
+  y_a = -380.0;
+  z_a = 40.0;
+ 
+  vizualize_scene();
+  
+}
+
+function run() {
+ if (state == 1) {
+     now_Date = new Date();
+     ms = now_Date.getTime() - start_Date.getTime();
+     t = ms/1000;
+     //calculate_position();
+     dt = t - t_prev;
+     t_prev = t;
+	 sinpsi = Math.sin(psi);
+     cospsi = Math.cos(psi);
+	 //Аэродинамика
+     alpha = alpha_deg*Math.PI/180;           // угол атаки крыла в радианах
+     Cy_a_gamma = Cy_alpha[alpha_deg+1]*Math.cos(gamma);
+     Cx_a = Cx_alpha[alpha_deg+1];
+     beta = Cx_a/Cy_a_gamma - T_eng; // угол снижения (относительно воздуха)
+     teta = (alpha_deg - 2)*Math.PI/180 - beta; // тангаж в радианах
+     V = Math.sqrt(354/Cy_a_gamma);  //воздушная  скорость, м/сек
+     V_prib = V*Math.cos(beta+teta);   // приборная скорость, м/сек
+     V_z = -V*Math.sin(beta);      // вертикальная скорость, м/сек  
+	 V_x = V*Math.cos(beta)*sinpsi; //проекция горизонтальной скорости без учета ветра
+	 V_y = V*Math.cos(beta)*cospsi; //проекция горизонтальной скорости без учета ветра
+	 x_a = x_a + V_x*dt; //координата планера
+     y_a = y_a + V_y*dt; //координата планера
+     z_a = z_a + V_z*dt; //координата планера
+	 psi = psi + (9.81*Math.sin(gamma)/V)*dt;
+	 if (psi > 2*Math.PI) psi = psi - 2*Math.PI;
+	 if (psi < 0) psi = psi + 2*Math.PI;
+     vizualize_scene();
+     	 
+	 if (z_a > 2) setTimeout(run, 40);
+ }     
+}
+
+function startstop() {
+ if (state == 0) {
+		   start_Date = new Date();
+		   start_Date.setTime(start_Date.getTime());
+		   state = 1;
+		   run();
+ }
+ else {
+    state = 0;
+    initiate();
+ }
+}
+
+function angleofattackincrease() {
+ if (state == 1 && alpha_deg  < 20) {
+	alpha_deg = alpha_deg + 1;
+ }
+}
+
+function angleofattackdecrease() {
+ if (state == 1 && alpha_deg  > -1) {
+	alpha_deg = alpha_deg - 1;
+ }
+}
+
+function rollincrease() {
+ if (state == 1 && gamma  < 30*Math.PI/180) {
+	gamma = gamma + 1.0*Math.PI/180;
+ }
+}
+
+function rolldecrease() {
+ if (state == 1 && gamma  > -30*Math.PI/180) {
+	gamma = gamma - 1.0*Math.PI/180;
+ }
+}
+
+function rollzero() {
+ if (state == 1) {
+	gamma = 0;
+ }
+}
+
+function thrustincrease() {
+ if (state == 1 && T_eng  < 0.2) {
+	T_eng = T_eng + 50.0/4500;
+ }
+}
+
+function thrustdecrease() {
+ if (state == 1 && T_eng  > 0) {
+	T_eng = T_eng - 50.0/4500;
+ }
+}
+</script>
+</head>
+ 
+<body onLoad="initiate();">
+<div id="cont1">
+<canvas id="holst" width="800" height="600"></canvas>
+</div>
+<div id="cont2">
+<form name="stpw" method='post' action=''>
+<div class="cont3">
+<b>Высота, м</b><br><br><br>
+<INPUT TYPE="text" readonly Name="height" size="4" style="color: black; font-size: 1.25em">
+</div>
+<div class="cont3">
+<b>Скорость, км/час</b><br><br><br>
+<INPUT TYPE="text" readonly Name="velocity" size="4" style="color: black; font-size: 1.25em">
+</div>
+<div class="cont3">
+<b>Вертикальная <br> скорость, м/сек</b><br><br>
+<INPUT TYPE="text" readonly Name="wvelocity" size="4" style="color: black; font-size: 1.25em"> 
+</div>
+<div class="cont3">
+<b>Курс, град</b><br><br><br>
+<INPUT TYPE="text" readonly Name="curse" size="4" style="color: black; font-size: 1.25em"> 
+</div>
+<div class="cont3">
+<b>Угол атаки, град</b><br><br>
+<INPUT TYPE="text" readonly Name="angleofattack" size="4" style="color: black; font-size: 1.25em"><br><br> 
+<INPUT TYPE="BUTTON" Name="ssbutton" VALUE="Вниз" onClick="angleofattackdecrease()">
+&nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;
+<INPUT TYPE="BUTTON" Name="ssbutton" VALUE="Вверх" onClick="angleofattackincrease()">
+</div>
+<div class="cont3">
+<b>Крен, град</b><br><br>
+<INPUT TYPE="text" readonly Name="roll" size="4" style="color: black; font-size: 1.25em"><br><br> 
+<INPUT TYPE="BUTTON" Name="ssbutton" VALUE="&nbsp;&nbsp;<&nbsp;&nbsp;" onClick="rolldecrease()"> &nbsp;
+<INPUT TYPE="BUTTON" Name="ssbutton" VALUE="&nbsp;&nbsp;0&nbsp;&nbsp;" onClick="rollzero()"> &nbsp;
+<INPUT TYPE="BUTTON" Name="ssbutton" VALUE="&nbsp;&nbsp;>&nbsp;&nbsp;" onClick="rollincrease()">
+</div>
+<div class="cont3">
+<b>Тяга двиг., Н</b><br><br>
+<INPUT TYPE="text" readonly Name="thrust" size="4" style="color: black; font-size: 1.25em"><br><br>
+<INPUT TYPE="BUTTON" Name="ssbutton" VALUE="&nbsp;&nbsp;<&nbsp;&nbsp;" onClick="thrustdecrease()">
+&nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;
+<INPUT TYPE="BUTTON" Name="ssbutton" VALUE="&nbsp;&nbsp;>&nbsp;&nbsp;" onClick="thrustincrease()">
+</div>
+<div class="cont3">
+<b>Время, сек</b><br><br>
+<INPUT TYPE="text" readonly Name="time" size="4" style="color: black; font-size: 1.25em"><br><br>
+<INPUT TYPE="BUTTON" Name="ssbutton" VALUE="Пуск/Останов" onClick="startstop()"> 
+</div>
+</form>
+</div>
+</body>
+</html>
